@@ -15,10 +15,8 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
@@ -118,12 +116,16 @@ public abstract class Works {
     private final int parallel;
     private long numFiles = -1;
     private long totalSize = -1;
+    private final String srcKMSKey;
+    private final String dstKMSKey;
     
-    public CopyWork(String name, int parallel) {
+    public CopyWork(String name, String srcKMSKey, String dstKMSKey, int parallel) {
       this.name = name;
       this.parallel = parallel;
+      this.srcKMSKey = srcKMSKey;
+      this.dstKMSKey = dstKMSKey;
     }
-    
+
     private Connection createDB() throws SQLException {
       java.nio.file.Path currentRelativePath = Paths.get("");
       String cwd = currentRelativePath.toAbsolutePath().toString();
@@ -166,7 +168,20 @@ public abstract class Works {
         ExecutorService pool = Executors.newFixedThreadPool(parallel);
         Future<?>[] results = new Future<?>[parallel];
         for (int i = 0; i < parallel; i++) {
-          results[i] = pool.submit(new CopyWorker(conf, copies, db));
+          Configuration srcConf = conf;
+          Configuration dstConf = conf;
+          if (srcKMSKey != null && !srcKMSKey.isEmpty()) {
+            srcConf = new Configuration(conf);
+            srcConf.set("fs.s3a.server-side-encryption-algorithm", "SSE-KMS");
+            srcConf.set("fs.s3a.server-side-encryption.key", srcKMSKey);
+
+          }
+          if (dstKMSKey != null && !dstKMSKey.isEmpty()) {
+            dstConf = new Configuration(conf);
+            dstConf.set("fs.s3a.server-side-encryption-algorithm", "SSE-KMS");
+            dstConf.set("fs.s3a.server-side-encryption.key", dstKMSKey);
+          }
+          results[i] = pool.submit(new CopyWorker(srcConf, dstConf, copies, db));
         }
         for (int i = 0; i < parallel; i++) {
           results[i].get();
@@ -206,13 +221,16 @@ public abstract class Works {
         .getName());
 
     final ArrayBlockingQueue<CopyOp> queue;
-    final Configuration conf;
+    final Configuration srcConf;
+    final Configuration dstConf;
     final Connection db;
     static final AtomicInteger counter = new AtomicInteger(0);
     
-    public CopyWorker(Configuration conf, ArrayBlockingQueue<CopyOp> copies, Connection db) {
+    public CopyWorker(final Configuration srcConf, Configuration dstConf,
+      ArrayBlockingQueue<CopyOp> copies, Connection db) {
       this.queue = copies;
-      this.conf = conf;
+      this.srcConf = srcConf;
+      this.dstConf = dstConf;
       this.db = db;
     }
 
@@ -240,8 +258,8 @@ public abstract class Works {
       final FileSystem srcFS;
       final FileSystem dstFS;
       try {
-        srcFS = FileSystem.newInstance(new URI(op.src), conf);
-        dstFS = FileSystem.newInstance(new URI(op.dst), conf);
+        srcFS = FileSystem.newInstance(new URI(op.src), srcConf);
+        dstFS = FileSystem.newInstance(new URI(op.dst), dstConf);
       } catch (IOException e) {
         e.printStackTrace();
         return;

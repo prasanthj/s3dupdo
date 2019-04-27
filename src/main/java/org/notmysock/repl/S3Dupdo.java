@@ -36,7 +36,9 @@ public class S3Dupdo extends Configured implements Tool {
     options.addOption("op", "operation", true, "operation (plan, run, verify)");
     options.addOption("p", "parallel", true, "parallelize n-way");
     options.addOption("s", "src", true, "source data");
+    options.addOption("sk", "srcKMSKey", true, "source data's KMS key to decrypt");
     options.addOption("d", "dst", true, "destination data");
+    options.addOption("dk", "dstKMSKey", true, "destination data's KMS key to encrypt");
     options.addOption("v", "verbose", true, "verbose");
   }
   
@@ -81,7 +83,7 @@ public class S3Dupdo extends Configured implements Tool {
         help("Missing dst for planning");
         return 1;
       }
-      work = new Works.PlanWork(name, line.getOptionValue("src"), line.getOptionValue("dst"));
+      work = new Works.PlanWork(name, line.getOptionValue("dst"), line.getOptionValue("srcKMSKey"));
       break;
     case RUN:
       final int parallel;
@@ -90,7 +92,7 @@ public class S3Dupdo extends Configured implements Tool {
       } else {
         parallel = Integer.parseInt(line.getOptionValue("parallel"));
       }
-      work = new Works.CopyWork(name, parallel);
+      work = new Works.CopyWork(name, line.getOptionValue("srcKMSKey"), line.getOptionValue("dstKMSKey"), parallel);
       break;
     case RESET:
       // TODO
